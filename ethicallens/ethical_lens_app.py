@@ -1,6 +1,15 @@
 import tkinter as tk
 from tkinter import scrolledtext, font
 from tkinter import ttk
+import os
+import threading
+from tkinter import messagebox
+try:
+    from dotenv import load_dotenv
+    import openai
+except ImportError:
+    load_dotenv = None
+    openai = None
 
 class EthicalLensApp:
     def __init__(self, root):
@@ -51,6 +60,11 @@ class EthicalLensApp:
         )
         self.output_area.pack(pady=(5, 0), fill=tk.BOTH, expand=True)
 
+        # Copy All Analyses button
+        self.copy_button = ttk.Button(self.output_frame, text="Copy All Analyses", command=self.copy_output)
+        self.copy_button.pack(pady=(8, 0), anchor="e")
+        self.copy_button.config(state='disabled')
+
         # --- Updates Tab ---
         self.updates_frame = tk.Frame(self.notebook, bg="#f5f6fa")
         self.notebook.add(self.updates_frame, text="Updates")
@@ -66,23 +80,47 @@ class EthicalLensApp:
         self.updates_text.insert(tk.END, "June 17, 2025\n-------------------\n- Created initial Tkinter GUI skeleton for EthicalLens.\n- Added input box, Evaluate button, and scrollable output area.\n- Improved aesthetics: modern font, padding, and color scheme.\n- Scaffolded backend logic for ethical lens analysis.\n- Added this Updates tab to track project progress.\n")
         self.updates_text.config(state='disabled')
 
+        if load_dotenv:
+            load_dotenv()
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        if openai and self.api_key:
+            openai.api_key = self.api_key
+
     def evaluate(self):
         dilemma = self.input_text.get("1.0", tk.END).strip()
         if not dilemma:
             self.display_output("Please enter a moral dilemma above.")
             return
-        # Scaffold: Prepare prompts for each lens (no API call yet)
+        if not openai or not self.api_key:
+            self.display_output("OpenAI API or dotenv not installed, or API key missing. Please install requirements and set your API key in a .env file.")
+            return
+        self.display_output("Evaluating... Please wait.")
+        threading.Thread(target=self.fetch_analyses, args=(dilemma,), daemon=True).start()
+
+    def fetch_analyses(self, dilemma):
         lenses = [
             ("Utilitarianism", "You are a moral philosopher evaluating the following situation from a Utilitarian perspective. Provide a short, unbiased analysis without judgment."),
             ("Deontology", "You are a moral philosopher evaluating the following situation from a Deontological perspective. Provide a short, unbiased analysis without judgment."),
             ("Virtue Ethics", "You are a moral philosopher evaluating the following situation from a Virtue Ethics perspective. Provide a short, unbiased analysis without judgment."),
             ("Islamic Ethics", "You are a moral philosopher evaluating the following situation from an Islamic Ethics perspective. Provide a short, unbiased analysis without judgment.")
         ]
-        # Placeholder: Simulate output for each lens
         output = ""
-        for lens, prompt in lenses:
-            output += f"{lens}: [Analysis will appear here]\n\n"
-        output += "This is a neutral, comparative ethical reflection. No synthesis is made."
+        try:
+            for lens, prompt in lenses:
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": dilemma}
+                    ],
+                    max_tokens=120,
+                    temperature=0.2
+                )
+                analysis = response.choices[0].message.content.strip()
+                output += f"{lens}: {analysis}\n\n"
+            output += "This is a neutral, comparative ethical reflection. No synthesis is made."
+        except Exception as e:
+            output = f"Error: {str(e)}"
         self.display_output(output)
 
     def display_output(self, text):
@@ -90,6 +128,18 @@ class EthicalLensApp:
         self.output_area.delete(1.0, tk.END)
         self.output_area.insert(tk.END, text)
         self.output_area.config(state='disabled')
+        # Enable copy button if there is output
+        if text.strip():
+            self.copy_button.config(state='normal')
+        else:
+            self.copy_button.config(state='disabled')
+
+    def copy_output(self):
+        output = self.output_area.get(1.0, tk.END).strip()
+        if output:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(output)
+            self.root.update()  # Keeps clipboard after app closes
 
 if __name__ == "__main__":
     root = tk.Tk()
